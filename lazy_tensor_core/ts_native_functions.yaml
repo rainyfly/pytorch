@@ -10,7 +10,6 @@ full_codegen:
   - bitwise_and.Tensor
   - cos
   - clamp
-  - dropout
   - gelu
   - gelu_backward
   - log2
