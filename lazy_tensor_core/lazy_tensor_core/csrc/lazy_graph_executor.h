@@ -69,6 +69,28 @@ class LazyGraphExecutor {
 
   size_t IncTrimCounter();
 
+  // Dumps the backend specific text of the computation accumulated in the graph
+  // which is attached the tensors.
+  std::string DumpBackendComputation(const std::vector<LazyTensor>& tensors);
+
+  ir::Value GetDeviceDataIrValue(const at::Scalar& value,
+                                 lazy_tensors::PrimitiveType type,
+                                 const Device& device);
+  ir::Value GetIrValueForScalar(const at::Scalar& value,
+                                lazy_tensors::PrimitiveType type,
+                                const Device& device);
+  ir::Value GetIrValueForScalar(const at::Scalar& value, const Device& device);
+  ir::Value GetIrValueForScalar(
+      const at::Scalar& value, lazy_tensors::PrimitiveType type,
+      lazy_tensors::Span<const lazy_tensors::int64> dimensions,
+      const Device& device);
+  ir::Value GetIrValueForScalar(const at::Scalar& value,
+                                const lazy_tensors::Shape& shape,
+                                const Device& device);
+  ir::Value GetIrValueForScalar(
+      const at::Scalar& value, const lazy_tensors::Shape& shape,
+      c10::optional<at::ScalarType> logical_element_type, const Device& device);
+
  private:
   struct SyncTensorsConfig {
     // Whether we want to force data on the target tensors (hence trimming

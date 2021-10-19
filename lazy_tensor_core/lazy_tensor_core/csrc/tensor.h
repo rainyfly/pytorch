@@ -80,8 +80,6 @@ class LazyTensor {
   // possible overrides), and the new IR value.
   LazyTensor CreateFrom(ir::Value ir_value) const;
   LazyTensor CreateFrom(ir::Value ir_value, const Device& device) const;
-  LazyTensor CreateFrom(ir::Value ir_value,
-                        at::ScalarType logical_element_type) const;
   LazyTensor CreateFrom(
       ir::Value ir_value,
       c10::optional<at::ScalarType> logical_element_type_opt) const;
@@ -165,36 +163,6 @@ class LazyTensor {
 
   // Applies the queue of operations in preparation for using the data.
   void ApplyPendingGraph();
-
-  static ir::Value GetDeviceDataIrValue(const at::Scalar& value,
-                                        lazy_tensors::PrimitiveType type,
-                                        const Device& device);
-  static ir::Value GetIrValueForScalar(const at::Scalar& value,
-                                       lazy_tensors::PrimitiveType type,
-                                       const Device& device);
-  static ir::Value GetIrValueForScalar(const at::Scalar& value,
-                                       const Device& device);
-  static ir::Value GetIrValueForScalar(
-      const at::Scalar& value, lazy_tensors::PrimitiveType type,
-      lazy_tensors::Span<const lazy_tensors::int64> dimensions,
-      const Device& device);
-  static ir::Value GetIrValueForScalar(const at::Scalar& value,
-                                       const lazy_tensors::Shape& shape,
-                                       const Device& device);
-  static ir::Value GetIrValueForScalar(
-      const at::Scalar& value, const lazy_tensors::Shape& shape,
-      c10::optional<at::ScalarType> logical_element_type, const Device& device);
-
-  // Dumps the backend specific text of the computation accumulated in the graph
-  // which is attached the tensors.
-  static std::string DumpBackendComputation(
-      const std::vector<LazyTensor>& tensors);
-
-  // Operation which creates lazy tensors out of PyTorch CPU tensors by batching
-  // the requests to the computation servers.
-  static std::vector<LazyTensor> CreateTensors(
-      const std::vector<at::Tensor>& tensors,
-      const std::vector<std::string>& devices);
 
  private:
   LazyTensor(const at::Tensor& tensor, const Device& device);

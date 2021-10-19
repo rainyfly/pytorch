@@ -19,7 +19,6 @@
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/cast.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
-#include "lazy_tensor_core/csrc/ops/expand.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/ops/ops.h"
 #include "lazy_tensor_core/csrc/ops/view.h"
@@ -37,23 +36,6 @@
 #include "torch/csrc/autograd/variable.h"
 
 namespace torch_lazy_tensors {
-namespace {
-
-// Routing values to device data maximizes the changes for compilation cache
-// hits, but it can prevent the compiler to perform optimizations. So tensor
-// values which are within a given set, are routed to constant scalars if this
-// API returns true.
-bool IsSpecialScalar(const at::Scalar& value) {
-  static bool no_scalars =
-      lazy_tensors::sys_util::GetEnvBool("NO_SPECIAL_SCALARS", false);
-  if (!no_scalars && (value.isIntegral() || value.isFloatingPoint())) {
-    double scalar_value = value.toDouble();
-    return scalar_value == 0.0 || std::fabs(scalar_value) == 1.0;
-  }
-  return false;
-}
-
-}  // namespace
 
 LazyTensor::Data::~Data() { LazyGraphExecutor::Get()->UnregisterTensor(this); }
 
@@ -212,20 +194,6 @@ lazy_tensors::ComputationClient::DataPtr LazyTensor::CurrentDataHandle() const {
   return data()->handle;
 }
 
-std::string LazyTensor::DumpBackendComputation(
-    const std::vector<LazyTensor>& tensors) {
-  std::vector<ir::Value> ir_values;
-  for (auto& tensor : tensors) {
-    ir::Value ir_value = tensor.CurrentIrValue();
-    if (ir_value) {
-      ir_values.push_back(std::move(ir_value));
-    }
-  }
-  return !ir_values.empty()
-             ? ir::DumpUtil::ToBackend(ir_values, GetCurrentDevice())
-             : std::string();
-}
-
 void LazyTensor::SetDataHandle(
     lazy_tensors::ComputationClient::DataPtr handle) {
   SetDataHandle(std::move(handle), /*sync=*/true);
@@ -345,62 +313,6 @@ ir::Value LazyTensor::GetIrValueForTensor(const at::Tensor& tensor,
     data = TensorToDataHandle(tensor, device);
   }
   return CreateTensorNode(std::move(data), read_only);
-}
-
-ir::Value LazyTensor::GetDeviceDataIrValue(const at::Scalar& value,
-                                           lazy_tensors::PrimitiveType type,
-                                           const Device& device) {
-  lazy_tensors::ComputationClient::DataPtr data =
-      LazyGraphExecutor::Get()->GetDeviceData(
-          value, TensorTypeFromLtcType(type), device);
-  data->SetInfo(std::make_shared<LazyGraphExecutor::DeviceDataInfo>(
-      /*tensor_id=*/-1, /*read_only=*/true));
-  return ir::MakeNode<ir::ops::DeviceData>(std::move(data));
-}
-
-ir::Value LazyTensor::GetIrValueForScalar(const at::Scalar& value,
-                                          lazy_tensors::PrimitiveType type,
-                                          const Device& device) {
-  if (IsSpecialScalar(value)) {
-    return ir::ops::ScalarOp(std::move(value), type);
-  }
-  return GetDeviceDataIrValue(value, type, device);
-}
-
-ir::Value LazyTensor::GetIrValueForScalar(const at::Scalar& value,
-                                          const Device& device) {
-  return GetIrValueForScalar(
-      value, MakeLtcPrimitiveType(GetScalarType(value), &device), device);
-}
-
-ir::Value LazyTensor::GetIrValueForScalar(
-    const at::Scalar& value, lazy_tensors::PrimitiveType type,
-    lazy_tensors::Span<const lazy_tensors::int64> dimensions,
-    const Device& device) {
-  ir::Value ir_value = GetIrValueForScalar(value, type, device);
-  if (!dimensions.empty()) {
-    ir_value = ir::MakeNode<ir::ops::Expand>(
-        ir_value, lazy_tensors::util::ToVector<lazy_tensors::int64>(dimensions),
-        /*is_scalar_expand=*/true);
-  }
-  return ir_value;
-}
-
-ir::Value LazyTensor::GetIrValueForScalar(const at::Scalar& value,
-                                          const lazy_tensors::Shape& shape,
-                                          const Device& device) {
-  return GetIrValueForScalar(value, shape.element_type(), shape.dimensions(),
-                             device);
-}
-
-ir::Value LazyTensor::GetIrValueForScalar(
-    const at::Scalar& value, const lazy_tensors::Shape& shape,
-    c10::optional<at::ScalarType> logical_element_type, const Device& device) {
-  lazy_tensors::PrimitiveType type =
-      logical_element_type
-          ? MakeLtcPrimitiveType(*logical_element_type, &device)
-          : shape.element_type();
-  return GetIrValueForScalar(value, type, shape.dimensions(), device);
 }
 
 View::IrNode LazyTensor::GetViewUpdate(
@@ -549,20 +461,6 @@ void LazyTensor::UpdateFromTensorOut(const LazyTensor& tensor) {
   SetIrValue(tensor.GetIrValue());
 }
 
-
-std::vector<LazyTensor> LazyTensor::CreateTensors(
-    const std::vector<at::Tensor>& tensors,
-    const std::vector<std::string>& devices) {
-  std::vector<lazy_tensors::ComputationClient::DataPtr> handles =
-      CreateTensorsData(tensors, devices);
-  std::vector<LazyTensor> ltc_tensors;
-  for (size_t i = 0; i < handles.size(); ++i) {
-    ltc_tensors.push_back(
-        Create(std::move(handles[i]), tensors[i].scalar_type()));
-  }
-  return ltc_tensors;
-}
-
 ir::Value LazyTensor::CreateTensorNode(
     lazy_tensors::ComputationClient::DataPtr data, bool read_only) const {
   data->SetInfo(std::make_shared<LazyGraphExecutor::DeviceDataInfo>(
@@ -608,13 +506,6 @@ LazyTensor LazyTensor::CreateFrom(ir::Value ir_value,
   ir_value = MaybeCastIrValue(std::move(ir_value), device,
                               /*logical_element_type=*/c10::nullopt);
   return Create(std::move(ir_value), device, dtype_optional());
-}
-
-LazyTensor LazyTensor::CreateFrom(ir::Value ir_value,
-                                  at::ScalarType logical_element_type) const {
-  ir_value =
-      MaybeCastIrValue(std::move(ir_value), GetDevice(), logical_element_type);
-  return Create(std::move(ir_value), GetDevice(), logical_element_type);
 }
 
 LazyTensor LazyTensor::CreateFrom(
