@@ -2,7 +2,9 @@ import torch
 from collections import OrderedDict, defaultdict
 from typing import Union, Callable, Any, Dict, Tuple, Set, Optional
 from torch.ao.quantization.qconfig import add_module_to_qconfig_obs_ctr, QConfigAny
-
+from torch.ao.quantization.quantize import (
+    is_activation_post_process,
+)
 import re
 
 from torch.fx.graph import (
@@ -183,6 +185,9 @@ def generate_qconfig_map(
             qconfig_with_device_check = add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
 
         elif node.op == 'call_module':
+            # if the node is an observer, just continue - don't add it to the qconfig_map
+            if is_activation_post_process(modules[node.target]):
+                continue
             qconfig = maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_dict, type(modules[node.target]), node.target, global_qconfig)
 
@@ -293,3 +298,31 @@ def check_is_valid_fuse_custom_config_dict(fuse_custom_config_dict: Optional[Dic
     fuse_custom_config_dict_allowed_keys = {"additional_fuser_method_mapping",
                                             "preserved_attributes"}
     check_is_valid_config_dict(fuse_custom_config_dict, fuse_custom_config_dict_allowed_keys, "fuse_custom_config_dict")
+
+
+def compare_prepare_convert_qconfig_dict(prepare_qconfig_dict: Dict[str, Dict[Any, Any]],
+                                         convert_qconfig_dict: Dict[str, Dict[Any, Any]]) -> None:
+    r""" Compare the qconfig_dict passed in convert to the one from prepare and check the values
+
+    Args:
+      `prepare_qconfig_dict`: configuration dictionary for prepare quantization step
+      `convert_qconfig_dict`: configuration dictionary for convert quantization step
+    """
+    prepare_keys = prepare_qconfig_dict.keys()
+    convert_keys = convert_qconfig_dict.keys()
+
+    for k in prepare_keys:
+        if k == '':
+            assert k in convert_qconfig_dict, "Missing key {} from convert qconfig_dict when it was present in prepare".format(k)
+            assert convert_qconfig_dict[k] is None or prepare_qconfig_dict[k] == convert_qconfig_dict[k], "Expected \
+            convert qconfig_dict have the same qconfig as prepare qconfig_dict or None. \
+            Updated qconfig {} to {} for key {}".format(prepare_qconfig_dict[k], convert_qconfig_dict[k], k)
+        elif k in ['object_type', 'module_name', 'module_namr_regex']:
+            for name, qconfig in prepare_qconfig_dict[k].items():
+                assert name in convert_qconfig_dict[k], "Missing key {} {} from convert qconfig_dict \
+                when it was present in prepare".format(k, name)
+                assert convert_qconfig_dict[k][name] is None or prepare_qconfig_dict[k][name] == convert_qconfig_dict[k][name], \
+                    "Expected convert qconfig_dict have the same qconfig as prepare qconfig_dict or None. \
+                    Updated qconfig {} to {} for key {} {}".format(prepare_qconfig_dict[k], convert_qconfig_dict[k], k, name)
+        else:
+            assert "Unsupported key in convert_qconfig_dict {}".format(k)
