@@ -233,5 +233,10 @@ struct TORCH_API BytecodeEmitModeGuard {
 TORCH_API IValue to_tuple(std::vector<IValue> ivalues);
 TORCH_API IValue
 Table(const std::vector<std::pair<std::string, IValue>>& entries);
+
+// TODO remove these switches once interface call is rolled out.
+TORCH_API void enableMobileInterfaceCallExport();
+bool getMobileInterfaceCallExport();
+
 } // namespace jit
 } // namespace torch
