@@ -97,6 +97,43 @@ std::vector<c10::ScalarType> compute_dtype_bitwise_and(const at::Tensor& self, c
   return {self.scalar_type()};
 }
 
+std::vector<std::vector<int64_t>> compute_shape_native_batch_norm(const at::Tensor & input, const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & bias, const c10::optional<at::Tensor> & running_mean, const c10::optional<at::Tensor> & running_var, bool training, double momentum, double eps) {
+  if (running_mean.has_value() && running_var.has_value()) {
+    return {input.sizes().vec(), running_mean.value().sizes().vec(), running_var.value().sizes().vec()};
+  } else if (running_mean.has_value() || running_var.has_value()) {
+    LTC_ERROR() << "Unexpected case, running_mean or running_var but not both";
+  } else {
+    // input shape is assumed [N, C, H, W] and Batch Norm is defined as operating over C,
+    // so mean, var have shape of [C]
+    return {input.sizes().vec(), {input.sizes().vec()[1]}, {input.sizes().vec()[1]}};
+  }
+}
+
+std::vector<c10::ScalarType> compute_dtype_native_batch_norm(const at::Tensor & input, const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & bias, const c10::optional<at::Tensor> & running_mean, const c10::optional<at::Tensor> & running_var, bool training, double momentum, double eps) {
+  if (running_mean.has_value() && running_var.has_value()) {
+    return {input.scalar_type(), running_mean.value().scalar_type(), running_var.value().scalar_type()};
+  } else if (running_mean.has_value() || running_var.has_value()) {
+    LTC_ERROR() << "Unexpected case, running_mean or running_var but not both";
+  } else {
+    return {input.scalar_type(), input.scalar_type(), input.scalar_type()};
+  }
+}
+
+std::vector<std::vector<int64_t>> compute_shape_native_batch_norm_backward(const at::Tensor & grad_out, const at::Tensor & input, const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & running_mean, const c10::optional<at::Tensor> & running_var, const c10::optional<at::Tensor> & save_mean, const c10::optional<at::Tensor> & save_invstd, bool train, double eps, ::std::array<bool,3> output_mask) {
+  LTC_CHECK(weight.has_value()) << "Not sure what to do if weight is undefined";
+  return {input.sizes().vec(), weight.value().sizes().vec(), weight.value().sizes().vec()};
+}
+
+std::vector<c10::ScalarType> compute_dtype_native_batch_norm_backward(const at::Tensor & grad_out, const at::Tensor & input, const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & running_mean, const c10::optional<at::Tensor> & running_var, const c10::optional<at::Tensor> & save_mean, const c10::optional<at::Tensor> & save_invstd, bool train, double eps, ::std::array<bool,3> output_mask) {
+  // if (weight.has_value()){
+  //   return {input.scalar_type(), weight.value().scalar_type(), weight.value().scalar_type()};
+  // }
+  // if weight has no value, I don't think gradient to weight matters; but we still have to provide a valid
+  // scalartype or lazy tensor won't be happy
+
+  // TODO(whc) - not sure why, but weight.has_value() retuns true, while weight.value().scalar_type() is UNDEFINED
+  return {input.scalar_type(), input.scalar_type(), input.scalar_type()};
+}
 } // namespace ops
 } // namespace ir
 } // namespace torch_lazy_tensors
